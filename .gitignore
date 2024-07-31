@@ -1,0 +1,8 @@
+# Test & linter reports
+*report.xml
+*report.txt
+*report.json
+*.out
+
+# logs
+*.log
