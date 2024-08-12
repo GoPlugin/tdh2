@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/plugin/tdh2/go/tdh2/internal/group"
-	"github.com/plugin/tdh2/go/tdh2/internal/group/test"
+	"github.com/goplugin/tdh2/go/tdh2/internal/group"
+	"github.com/goplugin/tdh2/go/tdh2/internal/group/test"
 )
 
 var benchmarks = []*test.GroupBench{
