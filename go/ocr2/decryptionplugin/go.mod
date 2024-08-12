@@ -5,7 +5,7 @@ go 1.20
 require (
 	github.com/google/go-cmp v0.5.9
 	github.com/goplugin/plugin-libocr v0.0.1
-	github.com/goplugin/tdh2/go/tdh2 v0.0.0
+	github.com/goplugin/tdh2/go/tdh2 v0.0.1
 	github.com/stretchr/testify v1.3.0
 	google.golang.org/protobuf v1.30.0
 )
