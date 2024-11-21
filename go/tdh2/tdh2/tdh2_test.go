@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/goplugin/tdh2/go/tdh2/internal/group"
@@ -18,8 +20,6 @@ import (
 
 var supportedGroups = []string{
 	nist.NewP256().String(),
-	nist.NewP384().String(),
-	nist.NewP521().String(),
 }
 
 // unsupported implements an unsupported group
@@ -564,6 +564,17 @@ func TestCheckEi(t *testing.T) {
 				err: cmpopts.AnyError,
 			},
 			{
+				name: "negative share index",
+				ctxt: ctxt,
+				share: &DecryptionShare{
+					index: -1,
+					u_i:   ds.u_i,
+					e_i:   ds.e_i,
+					f_i:   ds.f_i,
+				},
+				err: cmpopts.AnyError,
+			},
+			{
 				name: "broken U",
 				ctxt: ctxt,
 				share: &DecryptionShare{
@@ -838,14 +849,6 @@ func TestParseGroup(t *testing.T) {
 		{
 			group: nist.NewP256().String(),
 			want:  nist.NewP256(),
-		},
-		{
-			group: nist.NewP384().String(),
-			want:  nist.NewP384(),
-		},
-		{
-			group: nist.NewP521().String(),
-			want:  nist.NewP521(),
 		},
 		{
 			group: "wrong",
@@ -1442,27 +1445,37 @@ func BenchmarkAll(b *testing.B) {
 			// run actual benchmarks
 			b.Run(fmt.Sprintf("%v %d out of %d Generate", typ, tc.k, tc.n), func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					GenerateKeys(group, nil, tc.k, tc.n, rand)
+					if _, _, _, err := GenerateKeys(group, nil, tc.k, tc.n, rand); err != nil {
+						b.Fatalf("GenerateKeys: %v", err)
+					}
 				}
 			})
 			b.Run(fmt.Sprintf("%v %d out of %d Encrypt", typ, tc.k, tc.n), func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					Encrypt(pk, msg, label, rand)
+					if _, err := Encrypt(pk, msg, label, rand); err != nil {
+						b.Fatalf("Encrypt: %v", err)
+					}
 				}
 			})
 			b.Run(fmt.Sprintf("%v %d out of %d Decrypt", typ, tc.k, tc.n), func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					ctxt.Decrypt(group, shares[i%len(shares)], rand)
+					if _, err := ctxt.Decrypt(group, shares[i%len(shares)], rand); err != nil {
+						b.Fatalf("Decrypt: %v", err)
+					}
 				}
 			})
 			b.Run(fmt.Sprintf("%v %d out of %d VerifyShare", typ, tc.k, tc.n), func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					VerifyShare(pk, ctxt, decShares[i%len(decShares)])
+					if err := VerifyShare(pk, ctxt, decShares[i%len(decShares)]); err != nil {
+						b.Fatalf("VerifyShare: %v", err)
+					}
 				}
 			})
 			b.Run(fmt.Sprintf("%v %d out of %d CombineShares", typ, tc.k, tc.n), func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					ctxt.CombineShares(group, decShares[:tc.k], tc.k, tc.n)
+					if _, err := ctxt.CombineShares(group, decShares[:tc.k], tc.k, tc.n); err != nil {
+						b.Fatalf("CombineShares: %v", err)
+					}
 				}
 			})
 		}
@@ -1750,6 +1763,24 @@ func TestRedealReuseOldShares(t *testing.T) {
 			// make sure old shares cannot be used for new encryptions
 			if err := VerifyShare(newPk, c, ds); err == nil {
 				t.Error("VerifyShare did not fail")
+			}
+		})
+	}
+}
+
+func TestClear(t *testing.T) {
+	for _, typ := range supportedGroups {
+		t.Run(typ, func(t *testing.T) {
+			g, r, _, _ := params(t, typ)
+			ms, _, shares, err := GenerateKeys(g, nil, 2, 3, r)
+			require.NoError(t, err)
+			originalScalar := ms.s.Clone()
+			ms.Clear()
+			require.NotEqual(t, originalScalar, ms.s)
+			for _, sh := range shares {
+				originalScalar = sh.v.Clone()
+				sh.Clear()
+				require.NotEqual(t, originalScalar, sh.v)
 			}
 		})
 	}

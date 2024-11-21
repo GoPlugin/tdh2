@@ -33,9 +33,21 @@ func (p PrivateShare) Marshal() ([]byte, error) {
 	return p.p.Marshal()
 }
 
+func (p *PrivateShare) MarshalJSON() ([]byte, error) {
+	return p.Marshal()
+}
+
 func (p *PrivateShare) Unmarshal(data []byte) error {
 	p.p = &tdh2.PrivateShare{}
 	return p.p.Unmarshal(data)
+}
+
+func (p *PrivateShare) UnmarshalJSON(data []byte) error {
+	return p.Unmarshal(data)
+}
+
+func (p *PrivateShare) Clear() {
+	p.p.Clear()
 }
 
 // DecryptionShare encodes TDH2 decryption share.
@@ -52,9 +64,17 @@ func (d DecryptionShare) Marshal() ([]byte, error) {
 	return d.d.Marshal()
 }
 
+func (d DecryptionShare) MarshalJSON() ([]byte, error) {
+	return d.Marshal()
+}
+
 func (d *DecryptionShare) Unmarshal(data []byte) error {
 	d.d = &tdh2.DecryptionShare{}
 	return d.d.Unmarshal(data)
+}
+
+func (d *DecryptionShare) UnmarshalJSON(data []byte) error {
+	return d.Unmarshal(data)
 }
 
 // PublicKey encodes TDH2 public key.
@@ -66,9 +86,17 @@ func (p PublicKey) Marshal() ([]byte, error) {
 	return p.p.Marshal()
 }
 
+func (p *PublicKey) MarshalJSON() ([]byte, error) {
+	return p.Marshal()
+}
+
 func (p *PublicKey) Unmarshal(data []byte) error {
 	p.p = &tdh2.PublicKey{}
 	return p.p.Unmarshal(data)
+}
+
+func (p *PublicKey) UnmarshalJSON(data []byte) error {
+	return p.Unmarshal(data)
 }
 
 // MasterSecret encodes TDH2 master key.
@@ -80,9 +108,21 @@ func (m MasterSecret) Marshal() ([]byte, error) {
 	return m.m.Marshal()
 }
 
+func (m MasterSecret) MarshalJSON() ([]byte, error) {
+	return m.Marshal()
+}
+
 func (m *MasterSecret) Unmarshal(data []byte) error {
 	m.m = &tdh2.MasterSecret{}
 	return m.m.Unmarshal(data)
+}
+
+func (m MasterSecret) UnmarshalJSON(data []byte) error {
+	return m.Unmarshal(data)
+}
+
+func (m *MasterSecret) Clear() {
+	m.m.Clear()
 }
 
 // Ciphertext encodes hybrid ciphertext.
@@ -113,7 +153,9 @@ func VerifyShare(c *Ciphertext, pk *PublicKey, share *DecryptionShare) error {
 // Aggregate decrypts the TDH2-encrypted key and using it recovers the
 // symmetrically encrypted plaintext. It takes decryption shares and
 // the total number of participants as the arguments.
-// Ciphertext and shares MUST be verified before calling Aggregate.
+// Ciphertext and shares MUST be verified before calling Aggregate,
+// all the shares have to be distinct and their number has to be
+// at least k (the scheme's threshold).
 func Aggregate(c *Ciphertext, shares []*DecryptionShare, n int) ([]byte, error) {
 	sh := []*tdh2.DecryptionShare{}
 	for _, s := range shares {

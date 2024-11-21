@@ -64,7 +64,7 @@ func (q *queue) GetCiphertext(ciphertextId CiphertextId) ([]byte, error) {
 	return nil, ErrNotFound
 }
 
-func (q *queue) SetResult(ciphertextId CiphertextId, plaintext []byte) {
+func (q *queue) SetResult(ciphertextId CiphertextId, plaintext []byte, err error) {
 	q.res = append(q.res, ciphertextId)
 	q.res = append(q.res, plaintext)
 }
@@ -97,17 +97,27 @@ func TestNewReportingPlugin(t *testing.T) {
 				MaxQueryLengthBytes:       1,
 				MaxObservationLengthBytes: 2,
 				MaxReportLengthBytes:      3,
+				K:                         1,
 			}),
 		},
 		{
 			name: "ok minimal",
-			conf: makeConfig(t, &config.ReportingPluginConfig{}),
+			conf: makeConfig(t, &config.ReportingPluginConfig{
+				K: 1,
+			}),
 		},
 		{
 			name: "broken conf",
 			conf: types.ReportingPluginConfig{
 				OffchainConfig: []byte("broken"),
 			},
+			err: cmpopts.AnyError,
+		},
+		{
+			name: "invalid threshold",
+			conf: makeConfig(t, &config.ReportingPluginConfig{
+				K: 0,
+			}),
 			err: cmpopts.AnyError,
 		},
 	} {
@@ -279,6 +289,11 @@ func TestQuery(t *testing.T) {
 				CiphertextId: []byte("1"),
 				Ciphertext:   []byte("broken"),
 			}),
+			want: ctxts,
+		},
+		{
+			name: "duplicate request",
+			in:   append(ctxts, ctxts[1]),
 			want: ctxts,
 		},
 	} {
@@ -498,6 +513,11 @@ func TestObservation(t *testing.T) {
 			})),
 			err: cmpopts.AnyError,
 		},
+		{
+			name:  "duplicate query",
+			query: makeQuery(t, append(ctxtsRaw[:3], ctxtsRaw[1])),
+			err:   cmpopts.AnyError,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dp := &decryptionPlugin{
@@ -570,7 +590,8 @@ func makeObservations(t *testing.T, oracle2ids map[int][]string, id2shares map[s
 }
 
 func TestReport(t *testing.T) {
-	_, pk, sh, err := tdh2easy.GenerateKeys(3, 5)
+	k := uint32(3)
+	_, pk, sh, err := tdh2easy.GenerateKeys(int(k), 5)
 	if err != nil {
 		t.Fatalf("GenerateKeys: %v", err)
 	}
@@ -714,14 +735,34 @@ func TestReport(t *testing.T) {
 			wantProcessed: true,
 			want:          want,
 		},
+		{
+			name:  "all processed, duplicate decryption shares in a single observation",
+			query: makeQuery(t, ctxts),
+			obs: makeObservations(t, map[int][]string{
+				0: {"id0", "id0", "id2"},
+				1: {"id0", "id1", "id2"},
+				2: {"id0", "id1", "id2"},
+				3: {"id0", "id1", "id2"},
+			}, shares),
+			wantProcessed: true,
+			want:          want,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			conf, err := config.DecodeReportingPluginConfig(makeConfig(t, &config.ReportingPluginConfig{
+				K: k,
+			}).OffchainConfig)
+			if err != nil {
+				t.Fatalf("DecodeReportingPluginConfig: %v", err)
+			}
 			dp := &decryptionPlugin{
-				logger:    dummyLogger{},
-				publicKey: pk,
+				logger:          dummyLogger{},
+				decryptionQueue: &queue{},
+				publicKey:       pk,
 				genericConfig: &types.ReportingPluginConfig{
 					F: 2,
 				},
+				specificConfig: conf,
 				oracleToKeyShare: map[commontypes.OracleID]int{
 					0: 0,
 					1: 1,
@@ -739,6 +780,9 @@ func TestReport(t *testing.T) {
 			if processed != tc.wantProcessed {
 				t.Errorf("got processed=%v, want=%v", processed, tc.wantProcessed)
 			}
+			// make sure Report() output is deterministic
+			_, secondReportBytes, _ := dp.Report(context.Background(), types.ReportTimestamp{}, tc.query, tc.obs)
+			require.Equal(t, reportBytes, secondReportBytes)
 			var report Report
 			if err := proto.Unmarshal(reportBytes, &report); err != nil {
 				t.Errorf("Unmarshal: %v", err)
@@ -762,7 +806,11 @@ func TestNewReportingPlugin_CustomConfigParser(t *testing.T) {
 		Logger:       loggers.MakeLogrusLogger(),
 	}
 
-	customParser.On("ParseConfig", mock.Anything).Return(&config.ReportingPluginConfigWrapper{}, nil).Once()
+	customParser.On("ParseConfig", mock.Anything).Return(&config.ReportingPluginConfigWrapper{
+		Config: &config.ReportingPluginConfig{
+			K: 1,
+		},
+	}, nil).Once()
 	_, _, err := factory.NewReportingPlugin(types.ReportingPluginConfig{})
 	require.NoError(t, err)
 
