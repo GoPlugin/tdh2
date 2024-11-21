@@ -9,13 +9,17 @@ import (
 	"github.com/goplugin/plugin-libocr/commontypes"
 	"github.com/goplugin/plugin-libocr/offchainreporting2/types"
 	"github.com/goplugin/tdh2/go/ocr2/decryptionplugin/config"
-	"github.com/goplugin/tdh2/go/tdh2easy"
+	"github.com/goplugin/tdh2/go/tdh2/tdh2easy"
 	"google.golang.org/protobuf/proto"
 )
 
 type DecryptionReportingPluginFactory struct {
-	DecryptionQueue DecryptionQueuingService
-	Logger          commontypes.Logger
+	DecryptionQueue  DecryptionQueuingService
+	ConfigParser     config.ConfigParser
+	PublicKey        *tdh2easy.PublicKey
+	PrivKeyShare     *tdh2easy.PrivateShare
+	OracleToKeyShare map[commontypes.OracleID]int
+	Logger           commontypes.Logger
 }
 
 type decryptionPlugin struct {
@@ -30,12 +34,12 @@ type decryptionPlugin struct {
 
 // NewReportingPlugin complies with ReportingPluginFactory.
 func (f DecryptionReportingPluginFactory) NewReportingPlugin(rpConfig types.ReportingPluginConfig) (types.ReportingPlugin, types.ReportingPluginInfo, error) {
-	pluginConfig, err := config.DecodeReportingPluginConfig(rpConfig.OffchainConfig)
+	pluginConfig, err := f.ConfigParser.ParseConfig(rpConfig.OffchainConfig)
 	if err != nil {
 		f.Logger.Error("unable to decode reporting plugin config", commontypes.LogFields{
 			"configDigest": rpConfig.ConfigDigest.String(),
 		})
-		return nil, types.ReportingPluginInfo{}, fmt.Errorf("unalbe to decode reporting plugin config: %w", err)
+		return nil, types.ReportingPluginInfo{}, fmt.Errorf("unable to decode reporting plugin config: %w", err)
 	}
 
 	info := types.ReportingPluginInfo{
@@ -49,31 +53,14 @@ func (f DecryptionReportingPluginFactory) NewReportingPlugin(rpConfig types.Repo
 		},
 	}
 
-	oracleToKeyShare := make(map[commontypes.OracleID]int)
-	for _, entry := range pluginConfig.Config.OracleIdToKeyIndex {
-		oID, ksID, err := config.DecodeOracleIdtoKeyShareIndex(entry)
-		if err != nil {
-			return nil, types.ReportingPluginInfo{}, fmt.Errorf("unalbe to decode reporting plugin oracle id to key Share index mapping: %w", err)
-		}
-		oracleToKeyShare[oID] = ksID
-	}
-
 	plugin := decryptionPlugin{
 		f.Logger,
 		f.DecryptionQueue,
-		&tdh2easy.PublicKey{},
-		&tdh2easy.PrivateShare{},
-		oracleToKeyShare,
+		f.PublicKey,
+		f.PrivKeyShare,
+		f.OracleToKeyShare,
 		&rpConfig,
 		pluginConfig,
-	}
-
-	if err = plugin.publicKey.Unmarshal(pluginConfig.Config.PublicKey); err != nil {
-		return nil, info, fmt.Errorf("cannot unmarshal public key: %w", err)
-	}
-
-	if err = plugin.privKeyShare.Unmarshal(pluginConfig.Config.PrivKeyShare); err != nil {
-		return nil, info, fmt.Errorf("cannot unmarshal private key share: %w", err)
 	}
 
 	return &plugin, info, nil
@@ -261,13 +248,13 @@ func (dp *decryptionPlugin) Report(ctx context.Context, ts types.ReportTimestamp
 				continue
 			}
 
-			validDecryptionShares[ciphertextID] = append(validDecryptionShares[ciphertextID], validDecryptionShare)
-			if len(validDecryptionShares[ciphertextID]) >= fPlusOne {
+			if len(validDecryptionShares[ciphertextID]) < fPlusOne {
+				validDecryptionShares[ciphertextID] = append(validDecryptionShares[ciphertextID], validDecryptionShare)
+			} else {
 				dp.logger.Trace("DecryptionReporting Report: we have already f+1 valid decryption shares", commontypes.LogFields{
 					"ciphertextID": ciphertextID,
 					"observer":     ob.Observer,
 				})
-				break
 			}
 		}
 	}

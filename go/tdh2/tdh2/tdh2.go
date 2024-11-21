@@ -9,9 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"go.dedis.ch/kyber/v3"
-	"go.dedis.ch/kyber/v3/group/nist"
-	"go.dedis.ch/kyber/v3/share"
+	"github.com/goplugin/tdh2/go/tdh2/internal/group"
+	"github.com/goplugin/tdh2/go/tdh2/internal/group/nist"
+	"github.com/goplugin/tdh2/go/tdh2/internal/group/share"
 )
 
 var (
@@ -22,19 +22,23 @@ var (
 	InputSize = defaultHash().Size()
 )
 
-func parseGroup(group string) (kyber.Group, error) {
+func parseGroup(group string) (group.Group, error) {
 	switch group {
-	case nist.NewBlakeSHA256P256().String():
-		return nist.NewBlakeSHA256P256(), nil
+	case nist.NewP256().String():
+		return nist.NewP256(), nil
+	case nist.NewP384().String():
+		return nist.NewP384(), nil
+	case nist.NewP521().String():
+		return nist.NewP521(), nil
 	}
 	return nil, fmt.Errorf("unsupported group: %q", group)
 }
 
-// PrivateShare is a node's private share. It extends kyber's share.PriShare.
+// PrivateShare is a node's private share. It extends group.s share.PriShare.
 type PrivateShare struct {
-	group kyber.Group
+	group group.Group
 	index int
-	v     kyber.Scalar
+	v     group.Scalar
 }
 
 func (s PrivateShare) String() string {
@@ -47,12 +51,12 @@ func (s PrivateShare) Index() int {
 
 // mulPoint returns a new point with value v*p, where v is a private scalar.
 // If p==nil, the returned point has value v*BasePoint.
-func (s *PrivateShare) mulPoint(p kyber.Point) kyber.Point {
+func (s *PrivateShare) mulPoint(p group.Point) group.Point {
 	return s.group.Point().Mul(s.v, p)
 }
 
 // mulScalar returns a new scalar with value v*a where v is a private scalar.
-func (s *PrivateShare) mulScalar(a kyber.Scalar) kyber.Scalar {
+func (s *PrivateShare) mulScalar(a group.Scalar) group.Scalar {
 	return s.group.Scalar().Mul(s.v, a)
 }
 
@@ -88,7 +92,8 @@ func (s *PrivateShare) Unmarshal(data []byte) error {
 	}
 
 	s.index = raw.Index
-	if s.v, err = unmarshalScalar(s.group, raw.V); err != nil {
+	s.v = s.group.Scalar()
+	if err = s.v.UnmarshalBinary(raw.V); err != nil {
 		return fmt.Errorf("cannot unmarshal: %w", err)
 	}
 	return nil
@@ -96,10 +101,10 @@ func (s *PrivateShare) Unmarshal(data []byte) error {
 
 // PubliKey defines a public and verification key.
 type PublicKey struct {
-	group  kyber.Group
-	g_bar  kyber.Point
-	h      kyber.Point
-	hArray []kyber.Point
+	group  group.Group
+	g_bar  group.Point
+	h      group.Point
+	hArray []group.Point
 }
 
 func (a *PublicKey) Equal(b *PublicKey) bool {
@@ -119,8 +124,8 @@ func (a *PublicKey) Equal(b *PublicKey) bool {
 
 // MasterSecret keeps the master secret of a TDH2 instance.
 type MasterSecret struct {
-	group kyber.Group
-	s     kyber.Scalar
+	group group.Group
+	s     group.Scalar
 }
 
 func (m MasterSecret) String() string {
@@ -209,18 +214,20 @@ func (p *PublicKey) Unmarshal(data []byte) error {
 		return fmt.Errorf("cannot parse group: %w", err)
 	}
 
-	if p.g_bar, err = unmarshalPoint(p.group, raw.G_bar); err != nil {
+	p.g_bar = p.group.Point()
+	if err = p.g_bar.UnmarshalBinary(raw.G_bar); err != nil {
 		return fmt.Errorf("unmarshaling G_bar: %w", err)
 	}
 
-	if p.h, err = unmarshalPoint(p.group, raw.H); err != nil {
+	p.h = p.group.Point()
+	if err = p.h.UnmarshalBinary(raw.H); err != nil {
 		return fmt.Errorf("unmarshaling H: %w", err)
 	}
 
-	p.hArray = []kyber.Point{}
+	p.hArray = []group.Point{}
 	for _, h := range raw.HArray {
-		new, err := unmarshalPoint(p.group, h)
-		if err != nil {
+		new := p.group.Point()
+		if err = new.UnmarshalBinary(h); err != nil {
 			return fmt.Errorf("cannot unmarshal point: %w", err)
 		}
 		p.hArray = append(p.hArray, new)
@@ -233,28 +240,28 @@ func (p *PublicKey) Unmarshal(data []byte) error {
 // It takes cryptographic group to be used, master secret to be used (if nil, a new secret is generated),
 // the total number of nodes n, the number of shares sufficient for decryption k, and a randomness source.
 // It returns the master secret (either passed or generated), public key, and secret key shares.
-func GenerateKeys(group kyber.Group, ms *MasterSecret, k, n int, rand cipher.Stream) (*MasterSecret, *PublicKey, []*PrivateShare, error) {
+func GenerateKeys(grp group.Group, ms *MasterSecret, k, n int, rand cipher.Stream) (*MasterSecret, *PublicKey, []*PrivateShare, error) {
 	if k > n {
 		return nil, nil, nil, fmt.Errorf("threshold is higher than total number of nodes")
 	}
 	if k <= 0 {
 		return nil, nil, nil, fmt.Errorf("threshold has to be positive")
 	}
-	if ms != nil && group.String() != ms.group.String() {
+	if ms != nil && grp.String() != ms.group.String() {
 		return nil, nil, nil, fmt.Errorf("inconsistent groups")
 	}
 
-	var s kyber.Scalar
+	var s group.Scalar
 	if ms != nil {
 		s = ms.s
 	}
-	poly := share.NewPriPoly(group, k, s, rand)
+	poly := share.NewPriPoly(grp, k, s, rand)
 	x := poly.Secret()
 	if ms != nil && !x.Equal(ms.s) {
 		return nil, nil, nil, fmt.Errorf("generated wrong secret")
 	}
 
-	HArray := make([]kyber.Point, n)
+	HArray := make([]group.Point, n)
 	shares := poly.Shares(n)
 	privShares := []*PrivateShare{}
 	// IDs are assigned consecutively from 0.
@@ -262,17 +269,17 @@ func GenerateKeys(group kyber.Group, ms *MasterSecret, k, n int, rand cipher.Str
 		if i != s.I {
 			return nil, nil, nil, fmt.Errorf("share index=%d, expect=%d", s.I, i)
 		}
-		HArray[i] = group.Point().Mul(s.V, nil)
-		privShares = append(privShares, &PrivateShare{group, s.I, s.V})
+		HArray[i] = grp.Point().Mul(s.V, nil)
+		privShares = append(privShares, &PrivateShare{grp, s.I, s.V})
 	}
 
 	return &MasterSecret{
-			group: group,
+			group: grp,
 			s:     x},
 		&PublicKey{
-			group:  group,
-			g_bar:  group.Point().Pick(rand),
-			h:      group.Point().Mul(x, nil),
+			group:  grp,
+			g_bar:  grp.Point().Pick(rand),
+			h:      grp.Point().Mul(x, nil),
 			hArray: HArray,
 		}, privShares, nil
 }
@@ -371,13 +378,13 @@ func checkEi(pk *PublicKey, ctxt *Ciphertext, share *DecryptionShare) error {
 
 // Ciphertext defines a ciphertext as output from the Encryption algorithm.
 type Ciphertext struct {
-	group kyber.Group
+	group group.Group
 	c     []byte
 	label []byte
-	u     kyber.Point
-	u_bar kyber.Point
-	e     kyber.Scalar
-	f     kyber.Scalar
+	u     group.Point
+	u_bar group.Point
+	e     group.Scalar
+	f     group.Scalar
 }
 
 // Verify checks if the ciphertext matches the public key
@@ -414,7 +421,7 @@ func (a *Ciphertext) Equal(b *Ciphertext) bool {
 
 // Decrypt decrypts a ciphertext using a secret key share x_i according to TDH2 paper.
 // The caller has to ensure that the ciphertext is validated.
-func (ctxt *Ciphertext) Decrypt(group kyber.Group, x_i *PrivateShare, rand cipher.Stream) (*DecryptionShare, error) {
+func (ctxt *Ciphertext) Decrypt(group group.Group, x_i *PrivateShare, rand cipher.Stream) (*DecryptionShare, error) {
 	if group.String() != ctxt.group.String() {
 		return nil, fmt.Errorf("incorrect ciphertext group: %q", ctxt.group)
 	}
@@ -442,7 +449,7 @@ func (ctxt *Ciphertext) Decrypt(group kyber.Group, x_i *PrivateShare, rand ciphe
 
 // CombineShares combines a set of decryption shares and returns the decrypted message.
 // The caller has to ensure that the ciphertext is validated.
-func (c *Ciphertext) CombineShares(group kyber.Group, shares []*DecryptionShare, k, n int) ([]byte, error) {
+func (c *Ciphertext) CombineShares(group group.Group, shares []*DecryptionShare, k, n int) ([]byte, error) {
 	if group.String() != c.group.String() {
 		return nil, fmt.Errorf("incorrect ciphertext group: %q", c.group)
 	}
@@ -526,16 +533,20 @@ func (c *Ciphertext) Unmarshal(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("cannot parse group: %w", err)
 	}
-	if c.e, err = unmarshalScalar(c.group, raw.E); err != nil {
+	c.e = c.group.Scalar()
+	if err = c.e.UnmarshalBinary(raw.E); err != nil {
 		return fmt.Errorf("cannot unmarshal E: %w", err)
 	}
-	if c.u, err = unmarshalPoint(c.group, raw.U); err != nil {
+	c.u = c.group.Point()
+	if err = c.u.UnmarshalBinary(raw.U); err != nil {
 		return fmt.Errorf("cannot unmarshal U: %w", err)
 	}
-	if c.u_bar, err = unmarshalPoint(c.group, raw.U_bar); err != nil {
+	c.u_bar = c.group.Point()
+	if err = c.u_bar.UnmarshalBinary(raw.U_bar); err != nil {
 		return fmt.Errorf("cannot unmarshal U_bar: %w", err)
 	}
-	if c.f, err = unmarshalScalar(c.group, raw.F); err != nil {
+	c.f = c.group.Scalar()
+	if err = c.f.UnmarshalBinary(raw.F); err != nil {
 		return fmt.Errorf("cannot unmarshal F: %w", err)
 	}
 	return nil
@@ -543,11 +554,11 @@ func (c *Ciphertext) Unmarshal(data []byte) error {
 
 // DecryptionShare defines a decryption share
 type DecryptionShare struct {
-	group kyber.Group
+	group group.Group
 	index int
-	u_i   kyber.Point
-	e_i   kyber.Scalar
-	f_i   kyber.Scalar
+	u_i   group.Point
+	e_i   group.Scalar
+	f_i   group.Scalar
 }
 
 // TODO(pszal): test + fix tests which currently ignore share equality
@@ -608,13 +619,16 @@ func (d *DecryptionShare) Unmarshal(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("cannot parse group: %w", err)
 	}
-	if d.e_i, err = unmarshalScalar(d.group, raw.E_i); err != nil {
+	d.e_i = d.group.Scalar()
+	if err = d.e_i.UnmarshalBinary(raw.E_i); err != nil {
 		return fmt.Errorf("cannot unmarshal E_i: %w", err)
 	}
-	if d.u_i, err = unmarshalPoint(d.group, raw.U_i); err != nil {
+	d.u_i = d.group.Point()
+	if err = d.u_i.UnmarshalBinary(raw.U_i); err != nil {
 		return fmt.Errorf("cannot unmarshal U_i: %w", err)
 	}
-	if d.f_i, err = unmarshalScalar(d.group, raw.F_i); err != nil {
+	d.f_i = d.group.Scalar()
+	if err = d.f_i.UnmarshalBinary(raw.F_i); err != nil {
 		return fmt.Errorf("cannot unmarshal F_i: %w", err)
 	}
 	return nil
@@ -628,7 +642,7 @@ func hash(msg []byte) []byte {
 }
 
 // hash1 is an implementation of the H_1 hash function (see p15 of the paper).
-func hash1(group string, g kyber.Point) ([]byte, error) {
+func hash1(group string, g group.Point) ([]byte, error) {
 	point, err := concatenate(group, g)
 	if err != nil {
 		return nil, fmt.Errorf("cannot concatenate points: %w", err)
@@ -637,7 +651,7 @@ func hash1(group string, g kyber.Point) ([]byte, error) {
 }
 
 // hash2 is an implementation of the H_2 hash function (see p15 of the paper).
-func hash2(msg, label []byte, g1, g2, g3, g4 kyber.Point, group kyber.Group) (kyber.Scalar, error) {
+func hash2(msg, label []byte, g1, g2, g3, g4 group.Point, group group.Group) (group.Scalar, error) {
 	if len(msg) != len(label) || len(msg) != InputSize {
 		return nil, fmt.Errorf("message and label must be %dB long", InputSize)
 	}
@@ -655,7 +669,7 @@ func hash2(msg, label []byte, g1, g2, g3, g4 kyber.Point, group kyber.Group) (ky
 }
 
 // hash4 is an implementation of the H_4 hash function (see p15 of the paper).
-func hash4(g1, g2, g3 kyber.Point, group kyber.Group) (kyber.Scalar, error) {
+func hash4(g1, g2, g3 group.Point, group group.Group) (group.Scalar, error) {
 	points, err := concatenate(group.String(), g1, g2, g3)
 	if err != nil {
 		return nil, fmt.Errorf("cannot concatenate points: %w", err)
@@ -667,7 +681,7 @@ func hash4(g1, g2, g3 kyber.Point, group kyber.Group) (kyber.Scalar, error) {
 
 // concatenate marshals and concatenates points (elements of a group). It is
 // used in hash functions.
-func concatenate(group string, points ...kyber.Point) ([]byte, error) {
+func concatenate(group string, points ...group.Point) ([]byte, error) {
 	final := group
 	for _, point := range points {
 		p, err := point.MarshalBinary()
@@ -689,28 +703,4 @@ func xor(a, b []byte) ([]byte, error) {
 		buf[i] = a[i] ^ b[i]
 	}
 	return buf, nil
-}
-
-// unmarshalPoint unmarshals point safely, i.e., avoiding panics present in the kyber lib.
-func unmarshalPoint(g kyber.Group, data []byte) (kyber.Point, error) {
-	if len(data) != g.PointLen() {
-		return nil, fmt.Errorf("incorrect length")
-	}
-	p := g.Point()
-	if err := p.UnmarshalBinary(data); err != nil {
-		return nil, err
-	}
-	return p, nil
-}
-
-// unmarshalScalar unmarshals scalar safely, i.e., avoiding panics present in the kyber lib.
-func unmarshalScalar(g kyber.Group, data []byte) (kyber.Scalar, error) {
-	if len(data) != g.ScalarLen() {
-		return nil, fmt.Errorf("incorrect length")
-	}
-	s := g.Scalar()
-	if err := s.UnmarshalBinary(data); err != nil {
-		return nil, err
-	}
-	return s, nil
 }
