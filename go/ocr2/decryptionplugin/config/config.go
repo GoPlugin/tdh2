@@ -1,10 +1,6 @@
 package config
 
 import (
-	"fmt"
-	"math"
-
-	"github.com/goplugin/plugin-libocr/commontypes"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -26,16 +22,14 @@ func EncodeReportingPluginConfig(rpConfig *ReportingPluginConfigWrapper) ([]byte
 	return proto.Marshal(rpConfig.Config)
 }
 
-func EncodeOracleIdtoKeyShareIndex(oracleID commontypes.OracleID, keyShareIndex int) *OracleIDtoKeyShareIndex {
-	return &OracleIDtoKeyShareIndex{
-		OracleId:      uint32(oracleID),
-		KeyShareIndex: uint32(keyShareIndex),
-	}
+//go:generate mockery --quiet --name ConfigParser --output ./mocks/ --case=underscore
+type ConfigParser interface {
+	ParseConfig(offchainConfig []byte) (*ReportingPluginConfigWrapper, error)
 }
 
-func DecodeOracleIdtoKeyShareIndex(oracleIDtoKeyShareIndex *OracleIDtoKeyShareIndex) (commontypes.OracleID, int, error) {
-	if oracleIDtoKeyShareIndex.OracleId > math.MaxUint8 {
-		return 0, 0, fmt.Errorf("oracleID is larger than MAX_UINT8")
-	}
-	return commontypes.OracleID(oracleIDtoKeyShareIndex.OracleId), int(oracleIDtoKeyShareIndex.KeyShareIndex), nil
+type DefaultConfigParser struct {
+}
+
+func (p *DefaultConfigParser) ParseConfig(offchainConfig []byte) (*ReportingPluginConfigWrapper, error) {
+	return DecodeReportingPluginConfig(offchainConfig)
 }

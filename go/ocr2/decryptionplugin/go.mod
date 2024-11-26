@@ -3,10 +3,11 @@ module github.com/goplugin/tdh2/go/ocr2/decryptionplugin
 go 1.20
 
 require (
+	github.com/google/go-cmp v0.5.9
 	//github.com/goplugin/plugin-libocr v0.0.0-20230503222226-29f534b2de1a
 	github.com/goplugin/plugin-libocr v0.1.1-beta //plugin update changes
-	//github.com/goplugin/tdh2 v0.0.0-20230523083904-ccb0d2ebd7d4
-	github.com/goplugin/tdh2  v0.0.1 //plugin update changes
+	//github.com/goplugin/tdh2/go/tdh2 v0.0.0-20230524070358-28006f3fdc99
+	github.com/goplugin/tdh2/go/tdh2 v0.0.1 //plugin update changes
 	google.golang.org/protobuf v1.30.0
 )
 
