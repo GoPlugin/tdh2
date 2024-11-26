@@ -26,10 +26,6 @@ func parseGroup(group string) (group.Group, error) {
 	switch group {
 	case nist.NewP256().String():
 		return nist.NewP256(), nil
-	case nist.NewP384().String():
-		return nist.NewP384(), nil
-	case nist.NewP521().String():
-		return nist.NewP521(), nil
 	}
 	return nil, fmt.Errorf("unsupported group: %q", group)
 }
@@ -58,6 +54,12 @@ func (s *PrivateShare) mulPoint(p group.Point) group.Point {
 // mulScalar returns a new scalar with value v*a where v is a private scalar.
 func (s *PrivateShare) mulScalar(a group.Scalar) group.Scalar {
 	return s.group.Scalar().Mul(s.v, a)
+}
+
+func (p *PrivateShare) Clear() {
+	p.group = nil
+	p.index = 0
+	p.v.Zero()
 }
 
 // privateShareRaw is used for PrivateShare (un)marshaling.
@@ -128,8 +130,13 @@ type MasterSecret struct {
 	s     group.Scalar
 }
 
-func (m MasterSecret) String() string {
+func (m *MasterSecret) String() string {
 	return fmt.Sprintf("group:%s value:hidden", m.group)
+}
+
+func (m *MasterSecret) Clear() {
+	m.group = nil
+	m.s.Zero()
 }
 
 // masterSecretRaw is used for MasterSecret (un)marshaling.
@@ -362,7 +369,7 @@ func VerifyShare(pk *PublicKey, ctxt *Ciphertext, share *DecryptionShare) error 
 func checkEi(pk *PublicKey, ctxt *Ciphertext, share *DecryptionShare) error {
 	g := pk.group
 	ui_hat := g.Point().Sub(g.Point().Mul(share.f_i, ctxt.u), g.Point().Mul(share.e_i, share.u_i))
-	if share.index >= len(pk.hArray) {
+	if share.index < 0 || share.index >= len(pk.hArray) {
 		return fmt.Errorf("invalid share index")
 	}
 	hi_hat := g.Point().Sub(g.Point().Mul(share.f_i, nil), g.Point().Mul(share.e_i, pk.hArray[share.index]))
@@ -448,7 +455,8 @@ func (ctxt *Ciphertext) Decrypt(group group.Group, x_i *PrivateShare, rand ciphe
 }
 
 // CombineShares combines a set of decryption shares and returns the decrypted message.
-// The caller has to ensure that the ciphertext is validated.
+// The caller has to ensure that the ciphertext is validated, the decryption shares are valid,
+// all the shares are distinct and the number of them is at least k.
 func (c *Ciphertext) CombineShares(group group.Group, shares []*DecryptionShare, k, n int) ([]byte, error) {
 	if group.String() != c.group.String() {
 		return nil, fmt.Errorf("incorrect ciphertext group: %q", c.group)
